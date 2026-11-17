@@ -1,0 +1,657 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Desk</title>
+<style>
+  /* Review Desk: a Frame.io-style review page. Dark; breadcrumb + version stack + status in the top bar; player with a timecode
+     bar and comment avatars under the scrubber; comment box under the player; Comments panel on the right. */
+  :root { --bg:#0D0D0F; --stage:#050506; --panel:#17171A; --panel2:#202024; --hover:#26262B; --line:#2A2A2F; --ink:#EDEDF0; --soft:#8B8B94; --dim:#5D5D66;
+    --acc:#6E5BFF; --acc2:#8A7BFF; --green:#2BC48A; --yellow:#F5B544; --red:#FF4D5E; --claude:#D97757; }
+  * { box-sizing:border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 "Segoe UI", system-ui, sans-serif; display:grid; grid-template-rows:52px 1fr; grid-template-columns:1fr 400px; overflow:hidden; }
+  svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex-shrink:0; }
+  button { font:inherit; border:0; background:none; color:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:6px; border-radius:8px; padding:6px 10px; }
+  button:hover { background:var(--hover); }
+  .av { width:28px; height:28px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#fff; flex-shrink:0; }
+  .av.n { background:linear-gradient(135deg, #8A7BFF, #5B45F0); }
+  .av.c { background:var(--claude); }
+  .pop { position:absolute; top:40px; background:var(--panel2); border:1px solid var(--line); border-radius:10px; box-shadow:0 16px 40px rgba(0,0,0,.5); padding:6px; display:none; z-index:20; min-width:220px; }
+  .pop.open { display:block; }
+  .pop .it { padding:8px 10px; border-radius:6px; cursor:pointer; display:flex; align-items:center; gap:10px; white-space:nowrap; }
+  .pop .it:hover { background:var(--hover); }
+  .pop .it.on { color:var(--acc2); }
+  .pop .it small { color:var(--soft); margin-left:auto; padding-left:14px; }
+
+  /* top bar */
+  header { grid-column:1 / 3; display:flex; align-items:center; gap:6px; padding:0 12px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .crumb { color:var(--soft); display:flex; align-items:center; gap:4px; }
+  .rel { position:relative; }
+  #fileBtn { font-weight:600; color:var(--ink); }
+  #verBtn { background:var(--panel2); border:1px solid var(--line); font-weight:700; font-size:12px; padding:4px 8px; }
+  #statusBtn { background:var(--panel2); border:1px solid var(--line); font-size:13px; padding:5px 10px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--dim); flex-shrink:0; }
+  .dot.review { background:var(--yellow); } .dot.progress { background:var(--acc2); } .dot.approved { background:var(--green); }
+  #right { margin-left:auto; display:flex; align-items:center; gap:10px; }
+  #send { background:var(--acc); color:#fff; font-weight:600; padding:7px 14px; }
+  #send:hover { background:var(--acc2); }
+  #send.sent { background:var(--panel2); color:var(--green); border:1px solid var(--line); }
+
+  /* player */
+  main { display:flex; flex-direction:column; min-height:0; min-width:0; }
+  #box { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; background:var(--stage); padding:16px; }
+  #wrap, #wrap2 { position:relative; height:100%; max-width:100%; }
+  #box.cmp { gap:16px; }
+  #box.cmp #wrap, #box.cmp #wrap2 { max-width:calc(50% - 8px); }
+  #wrap2 { display:none; } #box.cmp #wrap2 { display:block; }
+  #wrap2 video { cursor:default; }
+  .vlab { position:absolute; top:10px; left:10px; background:rgba(0,0,0,.7); border:1px solid var(--line); font-size:12px; font-weight:700; padding:2px 8px; border-radius:6px; display:none; z-index:3; }
+  #box.cmp .vlab { display:block; }
+  #cmpBtn.on { color:var(--acc2); background:color-mix(in srgb, var(--acc) 18%, transparent); }
+  video { height:100%; max-width:100%; display:block; background:#000; cursor:pointer; }
+  canvas, #shown { position:absolute; inset:0; width:100%; height:100%; }
+  canvas { pointer-events:none; }
+  canvas.drawing { pointer-events:auto; cursor:crosshair; box-shadow:0 0 0 2px var(--acc); }
+  #shown { pointer-events:none; display:none; }
+  #bar { background:var(--panel); border-top:1px solid var(--line); padding:0 14px 8px; }
+  #scrub { position:relative; height:44px; cursor:pointer; }
+  #track { position:absolute; left:0; right:0; top:8px; height:4px; background:var(--line); border-radius:2px; }
+  #scrub:hover #track { height:6px; top:7px; }
+  #fill { position:absolute; left:0; top:0; bottom:0; background:var(--acc); border-radius:2px; }
+  #knob { position:absolute; top:50%; width:12px; height:12px; margin:-6px 0 0 -6px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,.6); opacity:0; }
+  #scrub:hover #knob { opacity:1; }
+  #lane { position:absolute; left:0; right:0; top:20px; height:20px; }
+  .mk { position:absolute; width:18px; height:18px; margin-left:-9px; border-radius:50%; font-size:9px; font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(135deg, #8A7BFF, #5B45F0); border:1.5px solid var(--panel); }
+  .mk.done { background:var(--green); }
+  .mk.prev { background:var(--panel2); color:var(--soft); border-color:var(--line); }
+  .mk:hover, .mk.hot { transform:scale(1.25); z-index:2; box-shadow:0 0 0 2px var(--acc2); }
+  .rng { position:absolute; top:7px; height:4px; border-radius:2px; background:color-mix(in srgb, var(--acc2) 55%, transparent); pointer-events:none; }
+  .rng.hot { background:var(--acc2); }
+  #inout { position:absolute; top:5px; height:10px; border-radius:3px; background:color-mix(in srgb, var(--acc) 35%, transparent); border:1px solid var(--acc2); pointer-events:none; display:none; }
+  #peek { position:absolute; bottom:46px; transform:translateX(-50%); pointer-events:none; display:none; text-align:center; z-index:5; }
+  #peek canvas { position:static; width:auto; height:150px; border-radius:6px; border:1px solid var(--line); display:block; background:#000; }
+  #peek span { display:inline-block; margin-top:5px; background:var(--panel2); border:1px solid var(--line); font-size:12px; font-weight:600; padding:2px 8px; border-radius:6px; font-variant-numeric:tabular-nums; }
+  #peek .txt { display:block; width:240px; margin:5px auto 0; background:var(--panel2); border:1px solid var(--line); font-size:13px; padding:7px 10px; border-radius:8px; text-align:left; }
+  #ctrl { display:flex; align-items:center; gap:2px; }
+  #ctrl button { padding:6px 8px; color:var(--soft); }
+  #ctrl button:hover { color:var(--ink); }
+  #play { color:var(--ink) !important; }
+  #tc { font-variant-numeric:tabular-nums; margin:0 8px; color:var(--ink); }
+  #tc small { color:var(--soft); }
+  #rate { font-weight:700; font-size:12px; min-width:40px; justify-content:center; }
+  #loop.on { color:var(--acc2) !important; }
+
+  /* comment box under the player */
+  #compose { margin:10px 14px 14px; background:var(--panel2); border:1px solid var(--line); border-radius:12px; }
+  #compose:focus-within { border-color:var(--acc); }
+  #cTop { display:flex; gap:10px; padding:10px 12px 4px; align-items:flex-start; }
+  #txt { flex:1; border:0; outline:0; background:none; color:var(--ink); font:inherit; resize:none; height:22px; padding:3px 0; overflow:hidden; }
+  #txt::placeholder { color:var(--soft); }
+  #cBar { display:flex; align-items:center; gap:4px; padding:4px 8px 8px 46px; }
+  #cBar > button { color:var(--soft); padding:5px 8px; }
+  #cBar > button:hover { color:var(--ink); }
+  #stamp { background:color-mix(in srgb, var(--acc) 18%, transparent); color:var(--acc2) !important; font-weight:600; font-variant-numeric:tabular-nums; font-size:13px; }
+  #stamp.off { background:none; color:var(--soft) !important; text-decoration:line-through; }
+  #range.on { color:var(--acc2) !important; background:color-mix(in srgb, var(--acc) 18%, transparent); }
+  .tool { color:var(--soft); padding:5px 6px !important; }
+  .tool.sel { color:var(--ink); background:var(--hover); }
+  .sep { width:1px; height:18px; background:var(--line); margin:0 4px; }
+  #mic.rec { color:#fff !important; background:#FF2D55; font-weight:600; font-variant-numeric:tabular-nums; font-size:13px; animation:recp 1.4s ease-in-out infinite; }
+  #mic span { margin-left:6px; }
+  @keyframes recp { 50% { opacity:.72; } }
+  .cmBody audio { width:100%; height:36px; margin-top:8px; display:block; }
+  .cmBody .tr { color:var(--soft); font-style:italic; }
+  #draw.on { color:var(--acc2) !important; background:color-mix(in srgb, var(--acc) 18%, transparent); }
+  #pens { display:none; gap:6px; align-items:center; margin-left:4px; }
+  #pens.open { display:inline-flex; }
+  .sw { width:18px; height:18px; border-radius:50%; padding:0; border:2px solid var(--panel2); box-shadow:0 0 0 1px var(--line); }
+  .sw.sel { box-shadow:0 0 0 2px var(--ink); }
+  #save { margin-left:auto; background:var(--acc); color:#fff; font-weight:600; padding:6px 14px; }
+  #save:hover { background:var(--acc2); }
+  #save:disabled { background:var(--hover); color:var(--dim); cursor:default; }
+
+  /* comments panel */
+  aside { border-left:1px solid var(--line); background:var(--panel); display:flex; flex-direction:column; min-height:0; }
+  #aHead { display:flex; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--line); }
+  #aHead h3 { margin:0; font-size:15px; }
+  .count { background:var(--panel2); color:var(--soft); font-size:12px; font-weight:700; padding:1px 8px; border-radius:10px; }
+  #aTools { margin-left:auto; display:flex; gap:2px; color:var(--soft); }
+  #search { display:none; margin:10px 14px 0; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:7px 10px; color:var(--ink); font:inherit; outline:0; }
+  #search.open { display:block; }
+  #list { overflow:auto; flex:1; padding:6px 0 20px; }
+  .cm { padding:12px 14px; border-bottom:1px solid var(--line); position:relative; cursor:pointer; }
+  .cm:hover { background:color-mix(in srgb, var(--ink) 3%, transparent); }
+  .cm.live { background:color-mix(in srgb, var(--acc) 10%, transparent); }
+  .cm.done .txt, .cm.done .tcc { opacity:.5; }
+  .who { display:flex; align-items:center; gap:8px; }
+  .who b { font-weight:600; }
+  .who .ago { color:var(--soft); font-size:12px; }
+  .cmTools { margin-left:auto; display:flex; gap:2px; }
+  .cmTools button { padding:4px; color:var(--soft); }
+  .cmTools .del { visibility:hidden; }
+  .cm:hover .cmTools .del { visibility:visible; }
+  .ring { width:20px; height:20px; border-radius:50%; border:1.5px solid var(--dim); display:inline-flex; align-items:center; justify-content:center; }
+  .ring svg { width:12px; height:12px; stroke-width:3; opacity:0; }
+  .ring:hover { border-color:var(--green); } .ring:hover svg { opacity:.6; color:var(--green); }
+  .ring.on { background:var(--green); border-color:var(--green); } .ring.on svg { opacity:1; color:#fff; }
+  .cmBody { margin:6px 0 0 36px; }
+  .tcc { color:var(--acc2); font-weight:600; font-variant-numeric:tabular-nums; margin-right:6px; }
+  .txt { word-wrap:break-word; }
+  .cmBody img { width:100%; margin-top:8px; border-radius:6px; border:1px solid var(--line); display:block; }
+  .rep { margin-top:10px; display:flex; gap:8px; }
+  .rep .av { width:22px; height:22px; font-size:10px; }
+  .rep .rb { flex:1; }
+  .rep .rb b { font-weight:600; margin-right:6px; }
+  .rep .rb .ago { color:var(--soft); font-size:12px; }
+  .acts { margin-top:6px; color:var(--soft); font-size:13px; display:flex; gap:14px; }
+  .acts span:hover { color:var(--ink); }
+  .edit { width:100%; margin-top:2px; background:var(--panel2); border:1px solid var(--acc); border-radius:8px; padding:6px 10px; color:var(--ink); font:inherit; outline:0; resize:vertical; min-height:60px; }
+  .rbox { margin-top:8px; display:none; gap:6px; }
+  .rbox.open { display:flex; }
+  .rbox input { flex:1; background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:6px 10px; color:var(--ink); font:inherit; outline:0; }
+  .rbox input:focus { border-color:var(--acc); }
+  .sec { padding:14px 14px 6px; color:var(--soft); font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; display:flex; justify-content:space-between; cursor:pointer; }
+  .empty { color:var(--soft); padding:28px 14px; text-align:center; }
+  #keys { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:40; }
+  #keys.open { display:flex; }
+  #keys .k { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px 24px; width:440px; box-shadow:0 30px 80px rgba(0,0,0,.6); }
+  #keys h3 { margin:0 0 12px; font-size:16px; }
+  #keys .row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--line); color:var(--soft); }
+  #keys .row:last-child { border-bottom:0; }
+  #keys kbd { background:var(--panel2); border:1px solid var(--line); border-bottom-width:2px; border-radius:6px; padding:1px 7px; color:var(--ink); font:12px/1.6 "Segoe UI", sans-serif; margin-left:4px; }
+  #toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line); color:var(--ink); padding:10px 16px; border-radius:10px; display:none; font-weight:600; z-index:30; box-shadow:0 10px 30px rgba(0,0,0,.5); }
+</style>
+</head>
+<body>
+<svg style="display:none">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8V4z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4h3v16H7zM14 4h3v16h-3z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M19 20 9 12l10-8v16zM5 19V5"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m5 4 10 8-10 8V4zM19 5v14"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/></symbol>
+  <symbol id="i-loop" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></symbol>
+  <symbol id="i-range" viewBox="0 0 24 24"><path d="M7 4H4v16h3M17 4h3v16h-3M9 12h6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 19 19 5M9 5h10v10"/></symbol>
+  <symbol id="i-rect" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/></symbol>
+  <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+  <symbol id="i-cmp" viewBox="0 0 24 24"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+  <symbol id="i-anno" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+</svg>
+
+<header>
+  <div class="crumb"><span id="folder">Editor Renders</span><svg><use href="#i-chev"/></svg></div>
+  <div class="rel"><button id="fileBtn"><span id="name">Loading…</span><svg><use href="#i-down"/></svg></button><div class="pop" id="fileMenu" style="left:0;min-width:340px"></div></div>
+  <div class="rel"><button id="verBtn">V<span id="verN">1</span><svg style="width:14px;height:14px"><use href="#i-down"/></svg></button><div class="pop" id="verMenu" style="left:0"></div></div>
+  <div class="rel"><button id="statusBtn"><span class="dot" id="sDot"></span><span id="sTxt">No status</span><svg style="width:14px;height:14px"><use href="#i-down"/></svg></button><div class="pop" id="statusMenu" style="left:0"></div></div>
+  <div class="rel"><button id="cmpBtn" title="Compare two versions side by side"><svg><use href="#i-cmp"/></svg>Compare</button><div class="pop" id="cmpMenu" style="left:0"></div></div>
+  <div id="right"><a id="dl" title="Download (phone size)" style="color:var(--soft);display:inline-flex;padding:6px"><svg><use href="#i-dl"/></svg></a><span class="av n" id="meAv" title="You">Y</span><button id="send"><span>Send to Claude</span></button></div>
+</header>
+
+<main>
+  <div id="box"><div id="wrap"><span class="vlab" id="lab1"></span><video id="v" playsinline preload="auto"></video><img id="shown" alt=""><canvas id="c"></canvas></div><div id="wrap2"><span class="vlab" id="lab2"></span><video id="v2" muted playsinline preload="auto"></video></div></div>
+  <div id="bar">
+    <div id="scrub"><div id="track"><div id="fill"></div><div id="knob"></div></div><div id="inout"></div><div id="lane"></div>
+      <div id="peek"><canvas id="pc"></canvas><span id="pt"></span><div class="txt" id="ptx" style="display:none"></div></div></div>
+    <div id="ctrl">
+      <button id="play" title="Play (Space)"><svg><use href="#i-play"/></svg></button>
+      <button id="fb" title="Previous frame (←)"><svg><use href="#i-prev"/></svg></button>
+      <button id="ff" title="Next frame (→)"><svg><use href="#i-next"/></svg></button>
+      <button id="vol" title="Mute (M)"><svg><use href="#i-vol"/></svg></button>
+      <span id="tc">00:00:00 <small>/ 00:00:00</small></span>
+      <span style="margin-left:auto"></span>
+      <button id="rate" title="Speed (S)">1x</button>
+      <button id="loop" title="Loop"><svg><use href="#i-loop"/></svg></button>
+      <button id="full" title="Full screen (F)"><svg><use href="#i-full"/></svg></button>
+      <button id="keysBtn" title="Keyboard shortcuts (?)"><svg><use href="#i-keys"/></svg></button>
+    </div>
+  </div>
+  <div id="compose">
+    <div id="cTop"><span class="av n" id="meAv2">Y</span><textarea id="txt" placeholder="Leave your comment…" rows="1"></textarea></div>
+    <div id="cBar">
+      <button id="stamp" title="Pin this comment to the current frame"><svg><use href="#i-clock"/></svg><span id="at">00:00:00</span></button>
+      <button id="range" title="Comment on a range: click at the start, play or scrub to the end (I / O)"><svg><use href="#i-range"/></svg></button>
+      <button id="draw" title="Annotate (D)"><svg><use href="#i-pen"/></svg></button>
+      <button id="mic" title="Voice note (R): click to record, click again to send. Esc cancels."><svg><use href="#i-mic"/></svg><span id="micT" style="display:none"></span></button>
+      <span id="pens">
+        <button class="tool sel" data-tool="pen" title="Pen"><svg><use href="#i-pen"/></svg></button>
+        <button class="tool" data-tool="arrow" title="Arrow"><svg><use href="#i-arrow"/></svg></button>
+        <button class="tool" data-tool="rect" title="Box"><svg><use href="#i-rect"/></svg></button>
+        <span class="sep"></span>
+        <button class="sw sel" data-c="#FF2D55" style="background:#FF2D55"></button>
+        <button class="sw" data-c="#FFD60A" style="background:#FFD60A"></button>
+        <button class="sw" data-c="#FFFFFF" style="background:#FFFFFF"></button>
+        <button class="sw" data-c="#2BC48A" style="background:#2BC48A"></button>
+        <button id="undo" title="Undo (Ctrl+Z)" style="color:var(--soft)"><svg><use href="#i-undo"/></svg></button>
+      </span>
+      <button id="save" disabled>Send</button>
+    </div>
+  </div>
+</main>
+
+<aside>
+  <div id="aHead"><h3>Comments</h3><span class="count" id="count">0</span>
+    <div id="aTools">
+      <button id="searchBtn" title="Search"><svg><use href="#i-search"/></svg></button>
+      <div class="rel"><button id="filterBtn" title="Filter"><svg><use href="#i-filter"/></svg></button><div class="pop" id="filterMenu" style="right:0;left:auto;min-width:170px"></div></div>
+    </div>
+  </div>
+  <input id="search" placeholder="Search comments">
+  <div id="list"></div>
+</aside>
+<video id="pv" muted preload="auto" style="display:none"></video>
+<div id="toast"></div>
+<div id="keys"><div class="k"><h3>Keyboard shortcuts</h3>
+  <div class="row">Play / pause<span><kbd>Space</kbd><kbd>K</kbd></span></div>
+  <div class="row">One frame back / forward<span><kbd>←</kbd><kbd>→</kbd></span></div>
+  <div class="row">One second back / forward<span><kbd>J</kbd><kbd>L</kbd></span></div>
+  <div class="row">Write a comment<span><kbd>C</kbd><kbd>Enter</kbd></span></div>
+  <div class="row">Range start / end<span><kbd>I</kbd><kbd>O</kbd></span></div>
+  <div class="row">Annotate<span><kbd>D</kbd></span></div>
+  <div class="row">Undo annotation<span><kbd>Ctrl</kbd><kbd>Z</kbd></span></div>
+  <div class="row">Speed 1x → 1.25x → 1.5x → 1.75x → 2x → 0.5x<span><kbd>S</kbd></span></div>
+  <div class="row">Mute<span><kbd>M</kbd></span></div>
+  <div class="row">Full screen<span><kbd>F</kbd></span></div>
+  <div class="row">Voice note (start / send)<span><kbd>R</kbd></span></div>
+</div></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const v = $('#v'), c = $('#c'), ctx = c.getContext('2d'), shown = $('#shown'), pv = $('#pv');
+let ME = 'You';
+let cur = null, vids = [], notes = [], prev = null, drawing = false, pen = '#FF2D55', strokes = [], FPS = 60, stampOn = true, filter = 'all', query = '', prevOpen = true, sortBy = 'tc', tool = 'pen', inT = null;
+const toast = (m) => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), 2600); };
+const p2 = (n) => String(n).padStart(2, '0');
+const tcode = (t) => { const f = Math.round((t || 0) * FPS); return `${p2(Math.floor(f / FPS / 60))}:${p2(Math.floor(f / FPS) % 60)}:${p2(f % FPS)}`; };
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>');
+const icon = (id) => `<svg><use href="#i-${id}"/></svg>`;
+const ago = (iso) => {
+  if (!iso) return '';
+  const s = (Date.now() - Date.parse(iso)) / 1000;
+  return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm' : s < 86400 ? Math.floor(s / 3600) + 'h' : Math.floor(s / 86400) + 'd';
+};
+const STATUS = {none: 'No status', review: 'Needs Review', progress: 'In Progress', approved: 'Approved'};
+const closePops = () => document.querySelectorAll('.pop').forEach((p) => p.classList.remove('open'));
+document.addEventListener('click', (e) => { if (!e.target.closest('.rel')) closePops(); });
+const pop = (btn, menu, fill) => ($(btn).onclick = (e) => { e.stopPropagation(); const open = !$(menu).classList.contains('open'); closePops(); if (open) { fill(); $(menu).classList.add('open'); } });
+
+/* ---------- assets, version stack, status ---------- */
+async function loadList() {
+  vids = await (await fetch('/api/videos')).json();
+  if (!cur && vids.length) {
+    // ?v=<file name> opens that video straight away (Claude delivers a cut this way)
+    const q = new URLSearchParams(location.search), want = q.get('v'), with_ = vids.find((x) => x.name === q.get('cmp'));
+    await open(vids.find((x) => x.name === want) || vids[0]);
+    if (with_) setCompare(with_); // &cmp=<file> opens side by side
+    return;
+  }
+  if (cur) drawHeader();
+}
+const latestOf = () => { const l = {}; vids.forEach((x) => { if (!l[x.base] || x.key > l[x.base].key) l[x.base] = x; }); return Object.values(l).sort((a, b) => b.mtime - a.mtime); };
+const siblings = () => vids.filter((x) => x.base === cur.base).sort((a, b) => b.key - a.key);
+function drawHeader() {
+  cur = vids.find((x) => x.id === cur.id) || cur;
+  $('#dl').href = '/video?dl=1&id=' + encodeURIComponent(cur.id);
+  $('#folder').textContent = cur.folder; $('#name').textContent = cur.base; $('#verN').textContent = (cur.ver || '1').toUpperCase();
+  document.title = `${cur.base} V${cur.ver || 1} · Review Desk`;
+  $('#sDot').className = 'dot ' + (cur.status || 'none'); $('#sTxt').textContent = STATUS[cur.status || 'none'];
+  const s = $('#send'), sent = cur.sent && cur.notes > 0;
+  s.classList.toggle('sent', sent); s.innerHTML = sent ? `${icon('check')}<span>Sent ${cur.notes}</span>` : '<span>Send to Claude</span>';
+}
+pop('#fileBtn', '#fileMenu', () => {
+  $('#fileMenu').innerHTML = '';
+  latestOf().forEach((x) => {
+    const d = document.createElement('div'); d.className = 'it' + (x.base === cur.base ? ' on' : '');
+    d.innerHTML = `${esc(x.base)}<small>V${x.ver || 1} · ${x.folder}</small>`;
+    d.onclick = () => { closePops(); open(x); }; $('#fileMenu').appendChild(d);
+  });
+});
+pop('#verBtn', '#verMenu', () => {
+  $('#verMenu').innerHTML = '';
+  siblings().forEach((x) => {
+    const d = document.createElement('div'); d.className = 'it' + (x.id === cur.id ? ' on' : '');
+    d.innerHTML = `<b>V${(x.ver || '1').toUpperCase()}</b>${new Date(x.mtime).toLocaleString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})}<small>${x.notes ? x.notes + ' comments' : ''}</small>`;
+    d.onclick = () => { closePops(); open(x); }; $('#verMenu').appendChild(d);
+  });
+});
+pop('#statusBtn', '#statusMenu', () => {
+  $('#statusMenu').innerHTML = '';
+  Object.entries(STATUS).forEach(([k, label]) => {
+    const d = document.createElement('div'); d.className = 'it' + ((cur.status || 'none') === k ? ' on' : '');
+    d.innerHTML = `<span class="dot ${k}"></span>${label}`;
+    d.onclick = async () => { closePops(); await fetch('/api/status?name=' + encodeURIComponent(cur.name), {method: 'POST', body: JSON.stringify({status: k})}); cur.status = k; loadList(); };
+    $('#statusMenu').appendChild(d);
+  });
+});
+
+/* compare (Frame.io's side-by-side): the other version plays muted, locked to this player's clock */
+const v2 = $('#v2');
+let cmp = null, tmap = null;
+// this cut's time on the compared version (only known for the version right before, from the timemap)
+const onOther = (t) => (tmap && cmp && tmap.prev === cmp.name ? t + tmap.map.reduce((o, [from, off]) => (t >= from ? o + off : o), 0) : t);
+async function setCompare(x) {
+  cmp = x;
+  tmap = x ? await (await fetch('/api/timemap?name=' + encodeURIComponent(cur.name))).json() : null; $('#box').classList.toggle('cmp', !!x); $('#cmpBtn').classList.toggle('on', !!x);
+  if (x) { v2.src = '/video?id=' + encodeURIComponent(x.id); v2.playbackRate = v.playbackRate; $('#lab1').textContent = 'V' + (cur.ver || 1).toUpperCase(); $('#lab2').textContent = 'V' + (x.ver || 1).toUpperCase();
+    v2.addEventListener('loadedmetadata', () => { v2.currentTime = onOther(v.currentTime); if (!v.paused) v2.play(); }, {once: true}); }
+  else { v2.pause(); v2.removeAttribute('src'); v2.load(); }
+}
+pop('#cmpBtn', '#cmpMenu', () => {
+  $('#cmpMenu').innerHTML = '';
+  const others = siblings().filter((x) => x.id !== cur.id);
+  if (!others.length) $('#cmpMenu').innerHTML = '<div class="it" style="color:var(--soft)">Only one version</div>';
+  others.forEach((x) => {
+    const d = document.createElement('div'); d.className = 'it' + (cmp && cmp.id === x.id ? ' on' : '');
+    d.innerHTML = `Compare with <b>V${(x.ver || '1').toUpperCase()}</b>`;
+    d.onclick = () => { closePops(); setCompare(x); }; $('#cmpMenu').appendChild(d);
+  });
+  if (cmp) { const d = document.createElement('div'); d.className = 'it'; d.textContent = 'Stop comparing'; d.onclick = () => { closePops(); setCompare(null); }; $('#cmpMenu').appendChild(d); }
+});
+v.addEventListener('play', () => cmp && v2.play());
+v.addEventListener('pause', () => { if (cmp) { v2.pause(); v2.currentTime = onOther(v.currentTime); } });
+v.addEventListener('seeked', () => cmp && (v2.currentTime = onOther(v.currentTime)));
+v.addEventListener('ratechange', () => (v2.playbackRate = v.playbackRate));
+setInterval(() => { if (cmp && !v.paused && Math.abs(v2.currentTime - onOther(v.currentTime)) > 0.08) v2.currentTime = onOther(v.currentTime); }, 500);
+
+async function open(x) {
+  if (cmp) setCompare(null);
+  const t = v.currentTime, same = cur && cur.base === x.base;
+  cur = x; FPS = x.fps || FPS; drawHeader();
+  v.src = pv.src = '/video?id=' + encodeURIComponent(x.id); shown.style.display = 'none';
+  if (same) v.addEventListener('loadedmetadata', () => (v.currentTime = Math.min(t, v.duration)), {once: true}); // a version switch keeps the moment
+  history.replaceState(null, '', '?v=' + encodeURIComponent(x.name));
+  await loadNotes(); loadList();
+}
+async function loadNotes() {
+  notes = await (await fetch('/api/notes?name=' + encodeURIComponent(cur.name))).json();
+  prev = null; // his note (17 Oct 2026): a new version starts clean, old comments stay on the old version only
+  renderNotes();
+}
+
+/* ---------- comments ---------- */
+function seek(t, n) {
+  v.pause(); v.currentTime = t;
+  if (n && n.drawing) { shown.src = '/drawing/' + encodeURIComponent(n.drawing); shown.style.display = 'block'; } else shown.style.display = 'none';
+}
+const repliesOf = (n) => [...(n.reply ? [{by: 'Claude', text: n.reply, at: null}] : []), ...(n.replies || [])];
+function card(n, file, isPrev) {
+  const t = isPrev && n.t_next != null ? n.t_next : n.t;
+  const d = document.createElement('div'); d.className = 'cm' + (n.done ? ' done' : ''); d.dataset.t = t; d.dataset.id = n.id;
+  const te = n.t_end != null ? (isPrev && n.t_next != null ? n.t_end - n.t + n.t_next : n.t_end) : null;
+  const reps = repliesOf(n).map((r) => `<div class="rep"><span class="av ${r.by === ME ? 'n' : 'c'}">${r.by[0]}</span><div class="rb"><b>${r.by}</b><span class="ago">${ago(r.at)}</span><div class="txt">${esc(r.text)}</div></div></div>`).join('');
+  d.innerHTML = `<div class="who"><span class="av n">${esc(ME[0])}</span><b>${esc(ME)}</b><span class="ago">${ago(n.at)}</span>
+      <div class="cmTools">${isPrev ? '' : `<button class="del" data-a="del" title="Delete">${icon('trash')}</button>`}<button data-a="done" title="${n.done ? 'Mark as incomplete' : 'Mark as complete'}"><span class="ring${n.done ? ' on' : ''}">${icon('check')}</span></button></div></div>
+    <div class="cmBody"><span class="tcc">${tcode(t)}${te != null ? ' – ' + tcode(te) : ''}</span>${n.drawing ? `<span title="Has an annotation" style="color:var(--soft);vertical-align:-3px">${icon('anno')}</span> ` : ''}<span class="txt">${n.text ? esc(n.text) : ''}</span>${n.transcribing ? '<span class="tr">Transcribing…</span>' : ''}${n.transcript_error ? '<span class="tr">Could not transcribe. The audio is saved.</span>' : ''}
+      ${n.audio ? `<audio controls preload="metadata" src="/audio/${encodeURIComponent(n.audio)}"></audio>` : ''}${n.drawing && !isPrev ? `<img src="/drawing/${encodeURIComponent(n.drawing)}">` : ''}${reps}
+      <div class="acts"><span data-a="reply">Reply</span>${isPrev ? '' : '<span data-a="edit">Edit</span>'}</div>
+      <div class="rbox"><input placeholder="Reply…"><button data-a="post" style="background:var(--acc);color:#fff">Send</button></div></div>`;
+  const box = d.querySelector('.rbox'), inp = box.querySelector('input');
+  const post = async () => { const text = inp.value.trim(); if (!text) return; await api('PATCH', {id: n.id, patch: {replies: [...(n.replies || []), {by: ME, text, at: new Date().toISOString()}]}}, file); };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') post(); if (e.key === 'Escape') box.classList.remove('open'); });
+  d.onclick = (e) => {
+    if (e.target.closest('audio')) return;
+    const a = e.target.closest('[data-a]')?.dataset.a;
+    if (e.target.closest('.rbox') && a !== 'post') return;
+    if (a === 'done') return api('PATCH', {id: n.id, patch: {done: !n.done}}, file);
+    if (a === 'del') return confirm('Delete this comment?') && api('DELETE', {id: n.id}, file);
+    if (a === 'reply') { box.classList.toggle('open'); return inp.focus(); }
+    if (a === 'edit') {
+      const span = d.querySelector('.cmBody > .txt'); if (span.querySelector('textarea')) return;
+      span.innerHTML = '<textarea class="edit"></textarea>'; const ta = span.querySelector('textarea'); ta.value = n.text || ''; ta.focus();
+      ta.addEventListener('click', (ev) => ev.stopPropagation());
+      ta.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); api('PATCH', {id: n.id, patch: {text: ta.value.trim()}}, file); } if (ev.key === 'Escape') renderNotes(); });
+      return;
+    }
+    if (e.target.closest('textarea')) return;
+    if (a === 'post') return post();
+    seek(t, isPrev ? null : n);
+  };
+  d.addEventListener('mouseenter', () => document.querySelectorAll(`[data-mk="${n.id}"]`).forEach((m) => m.classList.add('hot')));
+  d.addEventListener('mouseleave', () => document.querySelectorAll(`[data-mk="${n.id}"]`).forEach((m) => m.classList.remove('hot')));
+  return d;
+}
+const sorted = (list) => [...list].sort(sortBy === 'tc' ? (a, b) => a.t - b.t : (a, b) => Date.parse(b.at || 0) - Date.parse(a.at || 0));
+const keep = (n) => (filter === 'all' || (filter === 'open' ? !n.done : n.done)) && (!query || (n.text + ' ' + repliesOf(n).map((r) => r.text).join(' ')).toLowerCase().includes(query));
+function renderNotes() {
+  const list = $('#list'); list.innerHTML = '';
+  $('#count').textContent = notes.length;
+  const mine = sorted(notes.filter(keep));
+  if (!notes.length && !prev) list.innerHTML = '<div class="empty">No comments yet.<br>Pause on a frame and leave one below the player.</div>';
+  mine.forEach((n) => list.appendChild(card(n, cur.name, false)));
+  if (notes.length && !mine.length) list.innerHTML = '<div class="empty">No comments match.</div>';
+  // the last version's comments with Claude's replies, timed to this cut, so each fix can be checked off here
+  if (prev) {
+    const done = prev.notes.filter((n) => n.done).length;
+    const h = document.createElement('div'); h.className = 'sec';
+    h.innerHTML = `<span>V${prev.ver.toUpperCase()} comments · ${prev.notes.length}</span><span>${done}/${prev.notes.length} complete ${prevOpen ? '▾' : '▸'}</span>`;
+    h.onclick = () => { prevOpen = !prevOpen; renderNotes(); };
+    list.appendChild(h);
+    if (prevOpen) sorted(prev.notes.filter(keep)).forEach((n) => list.appendChild(card(n, prev.name, true)));
+  }
+  const lane = $('#lane'); lane.innerHTML = '';
+  const D = v.duration || 1;
+  const add = (n, cls, t) => {
+    if (n.t_end != null) { const r = document.createElement('div'); r.className = 'rng'; r.dataset.mk = n.id; r.style.left = (100 * t / D) + '%'; r.style.width = (100 * (n.t_end - n.t) / D) + '%'; $('#scrub').appendChild(r); }
+    const m = document.createElement('div'); m.className = 'mk ' + cls; m.textContent = ME[0]; m.dataset.mk = n.id; m.style.left = (100 * t / D) + '%'; m._n = n; m._t = t; lane.appendChild(m);
+  };
+  $('#scrub').querySelectorAll('.rng').forEach((r) => r.remove());
+  if (prev) prev.notes.forEach((n) => add(n, 'prev', n.t_next != null ? n.t_next : n.t));
+  notes.forEach((n) => add(n, n.done ? 'done' : '', n.t));
+  tick();
+  pollTranscripts();
+}
+// a voice note's words arrive a few seconds after it is sent; don't redraw over a note that is playing
+let pollH = null;
+function pollTranscripts() {
+  if (pollH || !notes.some((n) => n.transcribing)) return;
+  pollH = setTimeout(() => { pollH = null; [...document.querySelectorAll('.cm audio')].some((a) => !a.paused) ? pollTranscripts() : loadNotes().then(loadList); }, 2000);
+}
+async function api(method, body, file = cur.name) {
+  const list = await (await fetch('/api/notes', {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: file, ...body})})).json();
+  if (file === cur.name) notes = list; else if (prev) prev.notes = list;
+  renderNotes(); loadList();
+}
+$('#searchBtn').onclick = () => { $('#search').classList.toggle('open'); $('#search').focus(); };
+$('#search').addEventListener('input', (e) => { query = e.target.value.trim().toLowerCase(); renderNotes(); });
+$('#search').addEventListener('keydown', (e) => e.stopPropagation());
+pop('#filterBtn', '#filterMenu', () => {
+  $('#filterMenu').innerHTML = '';
+  [['all', 'All comments'], ['open', 'Open'], ['done', 'Completed']].forEach(([k, l]) => {
+    const d = document.createElement('div'); d.className = 'it' + (filter === k ? ' on' : ''); d.textContent = l;
+    d.onclick = () => { filter = k; closePops(); renderNotes(); }; $('#filterMenu').appendChild(d);
+  });
+  const hr = document.createElement('div'); hr.style.cssText = 'height:1px;background:var(--line);margin:6px 4px'; $('#filterMenu').appendChild(hr);
+  [['tc', 'Sort by timecode'], ['new', 'Sort by newest']].forEach(([k, l]) => {
+    const d = document.createElement('div'); d.className = 'it' + (sortBy === k ? ' on' : ''); d.textContent = l;
+    d.onclick = () => { sortBy = k; closePops(); renderNotes(); }; $('#filterMenu').appendChild(d);
+  });
+});
+
+/* ---------- composer ---------- */
+const canSend = () => ($('#save').disabled = !($('#txt').value.trim() || strokes.length));
+async function save(voice) {
+  const text = $('#txt').value.trim();
+  if (!text && !strokes.length && !voice) return;
+  v.pause();
+  let png = null;
+  if (strokes.length) {  // the annotation on top of the frame it was drawn on, so the comment shows exactly what he saw
+    const out = document.createElement('canvas'); out.width = c.width; out.height = c.height;
+    const o = out.getContext('2d'); o.drawImage(v, 0, 0, out.width, out.height); o.drawImage(c, 0, 0);
+    png = out.toDataURL('image/png');
+  }
+  const body = {t: voice ? voice.t : stampOn ? (inT ?? v.currentTime) : 0, text, drawing: png};
+  if (voice) { body.audio = voice.audio; if (voice.t_end != null) body.t_end = voice.t_end; }
+  else if (inT != null && v.currentTime > inT + 0.05) body.t_end = v.currentTime;
+  await api('POST', body);
+  setRange(null);
+  $('#txt').value = ''; $('#txt').style.height = '22px'; strokes = []; repaint(); setDraw(false); canSend();
+  toast((voice ? 'Voice note added at ' + tcode(voice.t) : 'Comment added at ' + tcode(v.currentTime)));
+}
+/* ---------- voice notes ---------- */
+let rec = null;
+const micIdle = () => { $('#mic').classList.remove('rec'); $('#micT').style.display = 'none'; };
+async function startVoice() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('This browser cannot record here. Open the desk at http://127.0.0.1');
+  const wasT = stampOn ? (inT ?? v.currentTime) : 0, t_end = inT != null && v.currentTime > inT + 0.05 ? v.currentTime : null;
+  v.pause();
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true}}); }
+  catch (e) { return toast('Microphone blocked. Allow it for this page, then press the mic again.'); }
+  const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus'].find((m) => MediaRecorder.isTypeSupported(m));
+  const mr = new MediaRecorder(stream, type ? {mimeType: type} : undefined), chunks = [], t0 = Date.now();
+  rec = {mr, stream, cancel: false, tick: setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('#micT').textContent = `${Math.floor(s / 60)}:${p2(s % 60)}`; }, 250)};
+  const me = rec;
+  mr.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  mr.onstop = () => {
+    clearInterval(me.tick); stream.getTracks().forEach((k) => k.stop()); rec = null; micIdle();
+    if (me.cancel) return toast('Voice note cancelled');
+    const r = new FileReader();
+    r.onload = () => save({audio: r.result, t: wasT, t_end});
+    r.readAsDataURL(new Blob(chunks, {type: mr.mimeType}));
+  };
+  mr.start(1000);
+  $('#micT').textContent = '0:00'; $('#micT').style.display = 'inline'; $('#mic').classList.add('rec');
+}
+const stopVoice = (cancel) => { if (rec) { rec.cancel = !!cancel; rec.mr.stop(); } };
+$('#mic').onclick = () => (rec ? stopVoice() : startVoice());
+$('#stamp').onclick = () => { stampOn = !stampOn; $('#stamp').classList.toggle('off', !stampOn); };
+function setRange(t) { inT = t; $('#range').classList.toggle('on', t != null); paintRange(); }
+function paintRange() {
+  const io = $('#inout'), D = v.duration || 1;
+  if (inT == null) { io.style.display = 'none'; $('#at').textContent = tcode(v.currentTime); return; }
+  const a = Math.min(inT, v.currentTime), b = Math.max(inT, v.currentTime);
+  io.style.display = 'block'; io.style.left = (100 * a / D) + '%'; io.style.width = Math.max(0.3, 100 * (b - a) / D) + '%';
+  $('#at').textContent = tcode(inT) + ' – ' + tcode(v.currentTime);
+}
+$('#range').onclick = () => setRange(inT == null ? v.currentTime : null);
+function repaint() {
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.lineWidth = c.width / 120; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  strokes.forEach((s) => {
+    ctx.strokeStyle = s.c; ctx.beginPath();
+    const [a, b] = [s.p[0], s.p[s.p.length - 1]];
+    if (s.tool === 'rect') ctx.strokeRect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
+    else if (s.tool === 'arrow') {
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]), h = c.width / 28;
+      ctx.moveTo(...a); ctx.lineTo(...b);
+      ctx.moveTo(b[0] - h * Math.cos(ang - 0.45), b[1] - h * Math.sin(ang - 0.45)); ctx.lineTo(...b); ctx.lineTo(b[0] - h * Math.cos(ang + 0.45), b[1] - h * Math.sin(ang + 0.45));
+      ctx.stroke();
+    } else { s.p.forEach((p, i) => (i ? ctx.lineTo(...p) : ctx.moveTo(...p))); ctx.stroke(); }
+  });
+}
+function setDraw(on) {
+  drawing = on; c.classList.toggle('drawing', on); $('#draw').classList.toggle('on', on); $('#pens').classList.toggle('open', on);
+  if (on) { v.pause(); shown.style.display = 'none'; }
+}
+const pt = (e) => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * c.width, (e.clientY - r.top) / r.height * c.height]; };
+let stroke = null;
+c.addEventListener('pointerdown', (e) => { if (!drawing) return; c.setPointerCapture(e.pointerId); stroke = {c: pen, tool, p: [pt(e)]}; strokes.push(stroke); });
+c.addEventListener('pointermove', (e) => { if (!drawing || !stroke) return; if (stroke.tool === 'pen') stroke.p.push(pt(e)); else stroke.p[1] = pt(e); repaint(); });
+c.addEventListener('pointerup', () => { stroke = null; canSend(); });
+$('#undo').onclick = () => { strokes.pop(); repaint(); canSend(); };
+document.querySelectorAll('.tool').forEach((b) => (b.onclick = () => { tool = b.dataset.tool; document.querySelectorAll('.tool').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); }));
+document.querySelectorAll('.sw').forEach((b) => (b.onclick = () => { pen = b.dataset.c; document.querySelectorAll('.sw').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); }));
+$('#draw').onclick = () => setDraw(!drawing);
+$('#save').onclick = save;
+$('#txt').addEventListener('focus', () => v.pause());
+$('#txt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } if (e.key === 'Escape') e.target.blur(); });
+$('#txt').addEventListener('input', (e) => { e.target.style.height = '22px'; e.target.style.height = Math.min(140, e.target.scrollHeight) + 'px'; canSend(); });
+$('#send').onclick = async () => {
+  if (!cur || !notes.length) return toast('No comments on this version yet');
+  await fetch('/api/submit', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name: cur.name})});
+  toast(`Sent ${notes.length} comments. Tell Claude: "notes are in"`); loadList();
+};
+
+/* ---------- player ---------- */
+v.addEventListener('loadedmetadata', () => { c.width = v.videoWidth; c.height = v.videoHeight; renderNotes(); });
+v.addEventListener('timeupdate', tick); v.addEventListener('seeked', tick);
+v.addEventListener('play', () => { $('#play').innerHTML = icon('pause'); shown.style.display = 'none'; });
+v.addEventListener('pause', () => ($('#play').innerHTML = icon('play')));
+v.addEventListener('click', () => { if (!drawing) v.paused ? v.play() : v.pause(); });
+function tick() {
+  const p = v.currentTime / (v.duration || 1);
+  $('#fill').style.width = p * 100 + '%'; $('#knob').style.left = p * 100 + '%';
+  $('#tc').innerHTML = `${tcode(v.currentTime)} <small>/ ${tcode(v.duration)}</small>`; $('#at').textContent = tcode(v.currentTime); paintRange();
+  // the comment at the playhead lights up (within half a second) and scrolls into view while playing
+  let best = null;
+  document.querySelectorAll('#list .cm').forEach((d) => { const dt = Math.abs(Number(d.dataset.t) - v.currentTime); if (dt < 0.5 && (!best || dt < best.dt)) best = {d, dt}; });
+  document.querySelectorAll('#list .cm.live').forEach((d) => d !== best?.d && d.classList.remove('live'));
+  if (best && !best.d.classList.contains('live')) { best.d.classList.add('live'); if (!v.paused) best.d.scrollIntoView({block: 'nearest', behavior: 'smooth'}); }
+}
+(function loop() { if (!v.paused) tick(); requestAnimationFrame(loop); })();
+const RATES = [1, 1.25, 1.5, 1.75, 2, 0.5];
+const setRate = (r) => { v.playbackRate = r; $('#rate').textContent = r + 'x'; };
+$('#rate').onclick = () => setRate(RATES[(RATES.indexOf(v.playbackRate) + 1) % RATES.length]);
+$('#loop').onclick = () => { v.loop = !v.loop; $('#loop').classList.toggle('on', v.loop); };
+$('#vol').onclick = () => { v.muted = !v.muted; $('#vol').innerHTML = icon(v.muted ? 'mute' : 'vol'); };
+$('#play').onclick = () => (v.paused ? v.play() : v.pause());
+const step = (d) => { v.pause(); v.currentTime = Math.min(v.duration, Math.max(0, v.currentTime + d)); };
+$('#fb').onclick = () => step(-1 / FPS); $('#ff').onclick = () => step(1 / FPS);
+$('#full').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : $('#box').requestFullscreen());
+$('#keysBtn').onclick = () => $('#keys').classList.add('open');
+$('#keys').onclick = () => $('#keys').classList.remove('open');
+
+/* scrubber: click to seek, hover for a frame preview; hover a comment avatar to read it */
+const sc = $('#scrub'), pc = $('#pc'), pctx = pc.getContext('2d');
+const frac = (e) => { const r = $('#track').getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+let dragging = false;
+sc.addEventListener('pointerdown', (e) => {
+  const mk = e.target.closest('.mk');
+  if (mk) return seek(mk._t, mk.classList.contains('prev') ? null : mk._n);
+  dragging = true; sc.setPointerCapture(e.pointerId); v.pause(); v.currentTime = frac(e) * (v.duration || 0);
+});
+sc.addEventListener('pointermove', (e) => { if (dragging) v.currentTime = frac(e) * (v.duration || 0); });
+sc.addEventListener('pointerup', () => (dragging = false));
+let peekT = null;
+sc.addEventListener('mousemove', (e) => {
+  const mk = e.target.closest('.mk');
+  const f = mk ? mk._t / (v.duration || 1) : frac(e), t = f * (v.duration || 0), pk = $('#peek');
+  pk.style.display = 'block'; pk.style.left = f * 100 + '%'; $('#pt').textContent = tcode(t);
+  $('#ptx').style.display = mk && mk._n.text ? 'block' : 'none'; if (mk) $('#ptx').textContent = mk._n.text;
+  if (pv.readyState >= 1 && Math.abs((peekT ?? -9) - t) > 0.05) { peekT = t; pv.currentTime = t; }
+});
+sc.addEventListener('mouseleave', () => ($('#peek').style.display = 'none'));
+pv.addEventListener('seeked', () => { pc.height = 300; pc.width = Math.round(300 * (pv.videoWidth / pv.videoHeight || 0.5625)); pctx.drawImage(pv, 0, 0, pc.width, pc.height); });
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); strokes.pop(); repaint(); return canSend(); }
+  if (e.code === 'Space' || e.key === 'k' || e.key === 'K') { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+  if (e.key === 'ArrowLeft') step(e.shiftKey ? -1 : -1 / FPS);
+  if (e.key === 'ArrowRight') step(e.shiftKey ? 1 : 1 / FPS);
+  if (e.key === 'j' || e.key === 'J') step(-1);
+  if (e.key === 'l' || e.key === 'L') step(1);
+  if (e.key === 'm' || e.key === 'M') $('#vol').click();
+  if (e.key === 's' || e.key === 'S') $('#rate').click();
+  if (e.key === 'f' || e.key === 'F') $('#full').click();
+  if (e.key === '?') $('#keys').classList.toggle('open');
+  if (e.key === 'Escape') { $('#keys').classList.remove('open'); setRange(null); stopVoice(true); }
+  if (e.key === 'r' || e.key === 'R') $('#mic').click();
+  if (e.key === 'i' || e.key === 'I') setRange(v.currentTime);
+  if ((e.key === 'o' || e.key === 'O') && inT != null) { v.pause(); $('#txt').focus(); }
+  if (e.key === 'd' || e.key === 'D') setDraw(!drawing);
+  if (e.key === 'c' || e.key === 'C' || e.key === 'Enter') { e.preventDefault(); $('#txt').focus(); }
+});
+fetch('/api/config').then((r) => r.json()).then((c) => {
+  ME = c.reviewer || 'You'; FPS = c.fps || 60;
+  ['#meAv', '#meAv2'].forEach((q) => { $(q).textContent = ME[0].toUpperCase(); $(q).title = ME; });
+  $('#send').querySelector('span').textContent = 'Send to ' + (c.editor || 'Claude');
+}).finally(loadList);
+</script>
+</body>
+</html>

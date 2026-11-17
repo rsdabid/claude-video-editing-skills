@@ -1,0 +1,13 @@
+*.mp4
+*.mov
+*.MOV
+*.wav
+*.mp3
+*.m4a
+*.webm
+node_modules/
+.DS_Store
+tools/review-desk/videos/*
+!tools/review-desk/videos/.gitkeep
+tools/review-desk/notes/*
+!tools/review-desk/notes/.gitkeep

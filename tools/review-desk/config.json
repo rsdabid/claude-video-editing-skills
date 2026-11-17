@@ -1,0 +1,8 @@
+{
+  "port": 7905,
+  "reviewer": "Client",
+  "editor": "Claude",
+  "fps": 30,
+  "folders": ["videos"],
+  "fpsByName": {}
+}

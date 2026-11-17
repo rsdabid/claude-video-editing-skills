@@ -1,0 +1,28 @@
+# name  hit_time  gain_dB  fade_in  pan  note   (Drive library only, natural pass)
+Riser_1           1.85  -12 0.5  0    keyboard lifts, smooth build
+HIT_REVERS        1.867 -15 0    0    reverse pull into cut
+SMOOTH_WOOSH_2    1.867 -9  0    0.3  air on cut
+IMPACT_ECO_trim   1.90  -17 0    0    soft low weight on cut
+DEPTH_trim        2.90  -16 0.4  -0.3 air along the edge push
+SMOOTH_WOOSH      3.85  -11 0    0    dissolve to teal
+SLOWMO_WHOOSH     3.92  -17 0    0    settle on teal
+PAPER_SWEEP_WOOSH 4.65  -11 0    -0.4 ribbon draws in
+LITTLE_WOOSH_BEST 6.00  -22 0.3  0.2  slow drift on rotate
+Swoosh            6.77  -11 0    0    cut to close-up
+woosh_6           7.13  -14 0    0.6  key flies in from right
+kA                7.20  -3  0    0.1  real key press seats
+SOLID_CLICK_2     7.20  -16 0    0.1  click body
+LITTLE_WOOSH_BEST 7.55  -15 0    0    glow breath
+kB   7.62  -12 0    -0.3 key ripple 1
+kC   7.86  -14 0    0.35 key ripple 2
+kD   8.10  -17 0    -0.5 key ripple 3
+kB   8.36  -20 0    0.55 key ripple 4
+PAPER_WHOOSH      9.35  -11 0    -0.3 ribbon sweeps over
+PAPER_WOOSH       9.52  -19 0    0.3  ribbon tail
+SMOOTH_WOOSH_2    9.70  -12 0    0    dissolve to exploded view
+IMPACT_FILM_trim  9.72  -13 0    0    exploded view weight
+SOLID_CLICK_3     9.78  -15 0    0    parts separate
+PAPER_SWEEP_WOOSH 10.30 -13 0    0.3  ribbon 1 rises
+PAPER_WOOSH       10.95 -13 0    0.4  ribbon 2 arcs
+PAPER_BEST_trim   11.90 -14 0    -0.4 ribbon 3 loops
+PAPER_DEEP_WOOSH  12.30 -18 0    -0.2 ribbon 3 low body
